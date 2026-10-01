@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>Mão → Número</title>
+<style>
+*{box-sizing:border-box} body{margin:0;background:#111;color:#fff;font-family:Arial,sans-serif;overflow:hidden}
+#app{position:relative;width:100vw;height:100vh;background:#000}
+video,#canvas{position:absolute;width:100%;height:100%;object-fit:cover;transform:scaleX(-1)}
+#canvas{z-index:2}
+#number{position:absolute;z-index:3;left:50%;top:10%;transform:translateX(-50%);
+font-size:clamp(80px,22vw,180px);font-weight:900;text-shadow:0 3px 12px #000}
+#status{position:absolute;z-index:4;left:50%;bottom:25px;transform:translateX(-50%);
+background:#000b;padding:12px 18px;border-radius:14px;text-align:center;font-size:15px}
+button{border:0;border-radius:12px;padding:12px 18px;font-size:16px;font-weight:bold}
+#start{position:absolute;z-index:5;left:50%;top:50%;transform:translate(-50%,-50%)}
+#hint{opacity:.75;margin-top:6px;font-size:13px}
+</style>
+</head>
+<body>
+<div id="app">
+  <video id="video" playsinline autoplay muted></video>
+  <canvas id="canvas"></canvas>
+  <div id="number">—</div>
+  <div id="status">Toque em iniciar<br><span id="hint">Mostre uma mão para a câmera</span></div>
+  <button id="start">Iniciar câmera</button>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/control_utils/control_utils.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
+
+<script>
+const video = document.getElementById('video');
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+const numberEl = document.getElementById('number');
+const statusEl = document.getElementById('status');
+const startBtn = document.getElementById('start');
+
+let camera;
+
+function dist(a,b){
+  return Math.hypot(a.x-b.x, a.y-b.y);
+}
+
+function fingerUp(lm, tip, pip){
+  return lm[tip].y < lm[pip].y;
+}
+
+function countFingers(lm, handedness){
+  let count = 0;
+
+  // Indicador, médio, anelar e mínimo
+  if (fingerUp(lm,8,6)) count++;
+  if (fingerUp(lm,12,10)) count++;
+  if (fingerUp(lm,16,14)) count++;
+  if (fingerUp(lm,20,18)) count++;
+
+  // Polegar: usa distância para reduzir erros quando a mão gira.
+  const thumbTip = lm[4], thumbIp = lm[3], indexMcp = lm[5];
+  const thumbExtended = dist(thumbTip,indexMcp) > dist(thumbIp,indexMcp)*1.18;
+
+  if (thumbExtended) count++;
+  return count;
+}
+
+function resize(){
+  canvas.width = video.videoWidth || window.innerWidth;
+  canvas.height = video.videoHeight || window.innerHeight;
+}
+window.addEventListener('resize', resize);
+
+const hands = new Hands({
+  locateFile: file => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
+});
+
+hands.setOptions({
+  maxNumHands: 1,
+  modelComplexity: 1,
+  minDetectionConfidence: 0.65,
+  minTrackingConfidence: 0.65
+});
+
+hands.onResults(results => {
+  resize();
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+
+  if (!results.multiHandLandmarks || !results.multiHandLandmarks.length){
+    numberEl.textContent = "—";
+    statusEl.innerHTML = "Mão não detectada<br><span id='hint'>Mostre a palma para a câmera</span>";
+    return;
+  }
+
+  const lm = results.multiHandLandmarks[0];
+  const handed = results.multiHandedness?.[0]?.label || "Right";
+  const n = countFingers(lm, handed);
+
+  // Desenha a mão sobre a imagem.
+  drawConnectors(ctx, lm, HAND_CONNECTIONS, {color:"#00ff88", lineWidth:4});
+  drawLandmarks(ctx, lm, {color:"#ffffff", lineWidth:1, radius:3});
+
+  numberEl.textContent = n;
+  statusEl.innerHTML = `Dedos detectados: <b>${n}</b><br><span id="hint">Levante outra quantidade de dedos</span>`;
+});
+
+startBtn.addEventListener('click', async () => {
+  try{
+    startBtn.style.display='none';
+    statusEl.textContent='Solicitando acesso à câmera...';
+
+    camera = new Camera(video, {
+      onFrame: async () => { await hands.send({image: video}); },
+      width: 1280,
+      height: 720
+    });
+
+    await camera.start();
+    statusEl.innerHTML = "Câmera ativa<br><span id='hint'>0 a 5 dedos → número na tela</span>";
+  }catch(e){
+    startBtn.style.display='block';
+    statusEl.innerHTML = "Não foi possível abrir a câmera.<br><span id='hint'>Permita o acesso à câmera e tente novamente.</span>";
+    console.error(e);
+  }
+});
+</script>
+</body>
+</html>
